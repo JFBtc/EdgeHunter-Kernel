@@ -11,7 +11,10 @@
       "Bash(dir /B:*)",
       "Bash(echo:*)",
       "Bash(dir:*)",
-      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest -v)"
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest -v)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest:*)",
+      "Bash(set MAX_RUNTIME_S=3)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main)"
     ]
   }
 }

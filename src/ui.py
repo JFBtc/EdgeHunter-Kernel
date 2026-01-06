@@ -23,15 +23,16 @@ class MinimalCLI:
         self.display_interval_ms = display_interval_ms
         self._running = False
 
-    def run(self, duration_seconds: Optional[int] = None) -> None:
+    def run(self, duration_seconds: Optional[float] = None) -> None:
         """
         Run the CLI display loop.
 
         Args:
-            duration_seconds: How long to run (None = run until interrupted)
+            duration_seconds: How long to run in seconds (None = run until interrupted)
+                             Uses monotonic time for accurate duration measurement.
         """
         self._running = True
-        start_time = time.time()
+        start_time_mono = time.perf_counter()
 
         print("EdgeHunter Core Kernel V1a.1 - Slice 1")
         print("=" * 80)
@@ -40,8 +41,8 @@ class MinimalCLI:
 
         try:
             while self._running:
-                # Check duration limit
-                if duration_seconds and (time.time() - start_time) >= duration_seconds:
+                # Check duration limit using monotonic time
+                if duration_seconds and (time.perf_counter() - start_time_mono) >= duration_seconds:
                     break
 
                 snapshot = self.datahub.get_latest()
