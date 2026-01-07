@@ -39,7 +39,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class IBKRConfig:
-    """IBKR connection configuration (V1a J1)."""
+    """
+    IBKR connection configuration (V1a J1).
+
+    V1a J0 Guardrail: Single instrument per run ONLY.
+    """
     client_id: int
     host: str = "127.0.0.1"
     port: int = 7497  # TWS paper trading default
@@ -53,6 +57,34 @@ class IBKRConfig:
     reconnect_backoff_base_s: float = 1.0
     reconnect_backoff_max_s: float = 60.0
     reconnect_max_per_minute: int = 5
+
+    def __post_init__(self):
+        """
+        Validate config at construction (V1a J0 Guardrail).
+
+        Enforces:
+        - Single instrument only (no lists)
+        - Explicit expiry format
+        """
+        # J0 Guardrail: Reject list/multi-instrument attempts
+        if isinstance(self.symbol, (list, tuple)):
+            raise ValueError(
+                "V1a J0 Guardrail: Multi-instrument not allowed. "
+                f"symbol must be string, got {type(self.symbol).__name__}"
+            )
+
+        if isinstance(self.contract_key, (list, tuple)):
+            raise ValueError(
+                "V1a J0 Guardrail: Multi-instrument not allowed. "
+                f"contract_key must be string, got {type(self.contract_key).__name__}"
+            )
+
+        # Validate explicit expiry format
+        if '.' not in self.contract_key:
+            raise ValueError(
+                f"V1a requires explicit expiry. "
+                f"contract_key must be 'SYMBOL.YYYYMM', got: {self.contract_key}"
+            )
 
 
 class IBKRAdapter:
