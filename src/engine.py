@@ -148,24 +148,36 @@ class EngineLoop:
         if self._md_mode != "REALTIME":
             feed_reasons.append("MD_NOT_REALTIME")
 
+        # Compute cycle time before gates (gates need engine_degraded input)
+        pre_gate_elapsed_ms = int(
+            (self.clock.now_mono_ns() - cycle_start_mono_ns) / 1_000_000
+        )
+        engine_degraded = pre_gate_elapsed_ms > self.overrun_threshold_ms
+
         gate_inputs = GateInputs(
             arm=self._arm,
             intent=self._intent,
-            session_phase=session_phase,
+            in_operating_window=in_operating,
+            is_break_window=is_break,
+            feed_connected=self._feed_connected,
+            md_mode=self._md_mode,
+            con_id=InstrumentDTO().con_id,
             bid=self._quote_bid,
             ask=self._quote_ask,
             last=self._quote_last,
-            quote_age_ms=quote_staleness_ms,
-            feed_degraded=feed_degraded,
+            quote_staleness_ms=quote_staleness_ms,
+            last_quote_event_mono_ns=self._last_quote_event_mono_ns,
+            ts_mono_ns=cycle_start_mono_ns,
             spread_ticks=spread_ticks,
+            engine_degraded=engine_degraded,
         )
-        allowed, reasons = evaluate_hard_gates(gate_inputs)
+        allowed, reasons, gate_metrics = evaluate_hard_gates(gate_inputs)
 
+        # Final cycle time after gates
         cycle_elapsed_ms = int(
             (self.clock.now_mono_ns() - cycle_start_mono_ns) / 1_000_000
         )
         cycle_overrun = cycle_elapsed_ms > self.cycle_target_ms
-        engine_degraded = cycle_elapsed_ms > self.overrun_threshold_ms
 
         snapshot = SnapshotDTO(
             schema_version="snapshot.v1",
@@ -214,6 +226,7 @@ class EngineLoop:
             gates=GatesDTO(
                 allowed=allowed,
                 reason_codes=reasons,
+                gate_metrics=gate_metrics,
             ),
             last_any_event_mono_ns=self._last_any_event_mono_ns,
             last_quote_event_mono_ns=self._last_quote_event_mono_ns,

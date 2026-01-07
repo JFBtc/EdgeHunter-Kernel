@@ -29,3 +29,5 @@ run_*.txt
 # OS
 .DS_Store
 Thumbs.db
+.sync_backup/
+J3_candidate.patch
