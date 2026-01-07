@@ -1,13 +1,31 @@
-﻿.venv/
+# Python
+.venv/
+venv/
 __pycache__/
 *.pyc
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 dist/
 build/
+*.egg-info/
+
+# Logs and data
 *.log
 storage/runs/
 *.jsonl
 run_*.json
 run_*.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

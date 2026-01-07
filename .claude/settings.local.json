@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv:*)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pip install:*)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pip install --upgrade pip setuptools)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pip install pytest pytest-timeout)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest -q)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main 5)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main 30)",
+      "Bash(dir /B:*)",
+      "Bash(echo:*)",
+      "Bash(dir:*)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest -v)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest:*)",
+      "Bash(set MAX_RUNTIME_S=3)",
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main)"
+    ]
+  }
+}
