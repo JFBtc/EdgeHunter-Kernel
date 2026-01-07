@@ -46,6 +46,7 @@ class SessionDTO:
     in_operating_window: bool = False
     is_break_window: bool = False
     session_date_iso: str = ""
+    session_phase: str = "CLOSED"
 
 
 @dataclass(frozen=True)
