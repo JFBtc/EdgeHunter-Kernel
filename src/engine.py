@@ -75,24 +75,31 @@ class EngineLoop:
             cycle_ms = 0  # Will be computed after work
             engine_degraded = False
 
-            # Build and publish snapshot (atomic)
+            # Build and publish snapshot (atomic) - J2 nested structure
+            from src.snapshot import ControlsDTO, LoopHealthDTO, GatesDTO
+
             snapshot = SnapshotDTO(
                 schema_version="snapshot.v1",
                 run_id=self.run_id,
                 snapshot_id=self._snapshot_id,
+                cycle_count=self._snapshot_id,  # Same as snapshot_id for now
                 ts_unix_ms=cycle_start_ms,
-                intent=self._intent,
-                arm=self._arm,
-                allowed=False,  # V1a.1 Slice 1: no gates yet, always False
-                reason_codes=["ARM_OFF", "INTENT_FLAT"],  # Placeholder
-                cycle_ms=cycle_ms,
-                engine_degraded=engine_degraded,
-                bid=None,
-                ask=None,
-                last=None,
-                spread_ticks=None,
-                staleness_ms=None,
-                extras={},
+                ts_mono_ns=cycle_start_ns,
+                controls=ControlsDTO(
+                    intent=self._intent,
+                    arm=self._arm,
+                ),
+                loop=LoopHealthDTO(
+                    cycle_ms=cycle_ms,
+                    engine_degraded=engine_degraded,
+                    last_cycle_start_mono_ns=cycle_start_ns,
+                ),
+                gates=GatesDTO(
+                    allowed=False,  # V1a.1 Slice 1: no gates yet, always False
+                    reason_codes=["ARM_OFF", "INTENT_FLAT"],  # Placeholder
+                ),
+                ready=False,  # V1a: ready == allowed
+                ready_reasons=["ARM_OFF", "INTENT_FLAT"],
             )
 
             self.datahub.publish(snapshot)
