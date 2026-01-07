@@ -27,7 +27,8 @@
       "Bash(/c/Users/barsa/AppData/Local/Programs/Python/Python311/python -m pip install:*)",
       "Bash(git checkout:*)",
       "Bash(git worktree:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(/c/Users/barsa/AppData/Local/Programs/Python/Python311/python:*)"
     ]
   }
 }

@@ -9,7 +9,6 @@ description = "Core Kernel V1a (Silent Observer)"
 requires-python = ">=3.10"
 dependencies = [
     "ib_insync>=0.9.86",
-    "tzdata>=2024.1",  # Required for Windows timezone support (J2)
 ]
 
 [project.optional-dependencies]

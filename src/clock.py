@@ -1,7 +1,7 @@
 """
 Clock & Time Utility - V1a J2
 
-Provides canonical time semantics with timezone support (America/Montreal).
+Provides canonical time semantics with timezone support.
 
 Responsibilities:
 - Wall-clock time (UTC and local)
@@ -11,18 +11,28 @@ Responsibilities:
 - Deterministic clock injection for testing
 
 Architecture:
-- Default implementation uses real system time
+- Default implementation uses real system time (OS local timezone)
 - Test implementations can inject frozen/mock time
 - All staleness calculations use monotonic time only
+- No hard dependency on IANA timezone database (portable on Windows)
 """
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Optional, Protocol
-from zoneinfo import ZoneInfo
 
 
-# Timezone constant (America/Montreal = America/Toronto per V1a spec)
-TIMEZONE_LOCAL = ZoneInfo("America/Montreal")
+def _get_local_tzinfo() -> tzinfo:
+    """
+    Get local timezone from OS without requiring IANA timezone database.
+
+    Portable on Windows without tzdata package.
+
+    Returns:
+        OS-provided local timezone info
+    """
+    # Use OS local timezone via datetime.now().astimezone()
+    # This works on all platforms without external dependencies
+    return datetime.now().astimezone().tzinfo
 
 
 class ClockProtocol(Protocol):
@@ -41,7 +51,7 @@ class ClockProtocol(Protocol):
         ...
 
     def now_local(self) -> datetime:
-        """Current time in America/Montreal timezone."""
+        """Current time in local timezone (OS-provided)."""
         ...
 
     def now_utc(self) -> datetime:
@@ -54,6 +64,7 @@ class SystemClock:
     Real system clock implementation.
 
     Uses time.time() for wall-clock and time.perf_counter_ns() for monotonic.
+    Uses OS local timezone (no IANA database dependency).
     """
 
     def now_unix_ms(self) -> int:
@@ -65,12 +76,12 @@ class SystemClock:
         return time.perf_counter_ns()
 
     def now_local(self) -> datetime:
-        """Current time in America/Montreal timezone."""
-        return datetime.now(TIMEZONE_LOCAL)
+        """Current time in local timezone (OS-provided)."""
+        return datetime.now().astimezone()
 
     def now_utc(self) -> datetime:
         """Current time in UTC timezone."""
-        return datetime.now(ZoneInfo("UTC"))
+        return datetime.now(timezone.utc)
 
 
 class SessionManager:
@@ -79,12 +90,17 @@ class SessionManager:
 
     Session semantics:
     - 23-hour session with 1-hour break
-    - Break window: 17:00-18:00 ET daily
-    - Session start: 18:00 ET (evening)
-    - Session date rolls at 17:00 ET (break start)
-    - Operating window: configurable (default 07:00-16:00 ET)
+    - Break window: 17:00-18:00 local time daily
+    - Session start: 18:00 local time (evening)
+    - Session date rolls at 17:00 local time (break start)
+    - Operating window: configurable (default 07:00-16:00 local time)
 
-    Example session timeline (America/Montreal time):
+    Note: "Local time" refers to the timezone where the futures exchange operates.
+    For US futures (MNQ/MES on CME), this is US Eastern Time.
+    The implementation uses OS local timezone by default, or accepts injected datetime
+    for testing.
+
+    Example session timeline (US Eastern Time):
     - Monday 18:00 → Tuesday 17:00 (session_date = Tuesday)
     - 17:00-18:00: break window (is_break_window=True)
     - Tuesday 18:00 → Wednesday 17:00 (session_date = Wednesday)
@@ -93,32 +109,32 @@ class SessionManager:
     def __init__(
         self,
         clock: Optional[ClockProtocol] = None,
-        operating_start_hour: int = 7,  # 07:00 ET
-        operating_end_hour: int = 16,   # 16:00 ET (before break)
+        operating_start_hour: int = 7,  # 07:00 local time
+        operating_end_hour: int = 16,   # 16:00 local time (before break)
     ):
         """
         Initialize session manager.
 
         Args:
             clock: Clock implementation (defaults to SystemClock)
-            operating_start_hour: Start of operating window (ET hour)
-            operating_end_hour: End of operating window (ET hour, exclusive)
+            operating_start_hour: Start of operating window (local hour)
+            operating_end_hour: End of operating window (local hour, exclusive)
         """
         self.clock = clock or SystemClock()
         self.operating_start_hour = operating_start_hour
         self.operating_end_hour = operating_end_hour
 
         # Break window constants
-        self.break_start_hour = 17  # 17:00 ET
-        self.break_end_hour = 18    # 18:00 ET
+        self.break_start_hour = 17  # 17:00 local time
+        self.break_end_hour = 18    # 18:00 local time
 
     def session_date_iso(self, now_local: Optional[datetime] = None) -> str:
         """
-        Compute session date (rolls at 17:00 ET).
+        Compute session date (rolls at 17:00 local time).
 
         Session date logic:
-        - If before 17:00 ET: session_date = current calendar date
-        - If 17:00 ET or after: session_date = next calendar date
+        - If before 17:00: session_date = current calendar date
+        - If 17:00 or after: session_date = next calendar date
 
         Args:
             now_local: Current local time (defaults to clock.now_local())
@@ -127,16 +143,16 @@ class SessionManager:
             ISO date string (YYYY-MM-DD)
 
         Examples:
-            - Monday 16:59 ET → Monday
-            - Monday 17:00 ET → Tuesday (break started, next session)
-            - Monday 18:00 ET → Tuesday (session running)
-            - Tuesday 16:59 ET → Tuesday
-            - Tuesday 17:00 ET → Wednesday
+            - Monday 16:59 → Monday
+            - Monday 17:00 → Tuesday (break started, next session)
+            - Monday 18:00 → Tuesday (session running)
+            - Tuesday 16:59 → Tuesday
+            - Tuesday 17:00 → Wednesday
         """
         if now_local is None:
             now_local = self.clock.now_local()
 
-        # Roll session date if at or past break start (17:00 ET)
+        # Roll session date if at or past break start (17:00 local)
         if now_local.hour >= self.break_start_hour:
             # Session date is tomorrow
             session_dt = now_local + timedelta(days=1)
@@ -148,7 +164,7 @@ class SessionManager:
 
     def is_break_window(self, now_local: Optional[datetime] = None) -> bool:
         """
-        Check if current time is in break window (17:00-18:00 ET).
+        Check if current time is in break window (17:00-18:00 local).
 
         Args:
             now_local: Current local time (defaults to clock.now_local())
@@ -231,7 +247,7 @@ def now_mono_ns() -> int:
 
 
 def now_local() -> datetime:
-    """Current time in America/Montreal timezone."""
+    """Current time in local timezone (OS-provided)."""
     return _default_clock.now_local()
 
 

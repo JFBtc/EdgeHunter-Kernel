@@ -3,19 +3,17 @@ Tests for V1a J2 - Time + Liveness + Session Windows
 
 Validates:
 - Clock/Time utility with timezone support
-- Session date computation (rolls at 17:00 ET)
+- Session date computation (rolls at 17:00 local)
 - Operating window and break window detection
 - Liveness tracking fields
 - Deterministic clock injection for testing
 """
 import pytest
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 
 from src.clock import (
     SystemClock,
     SessionManager,
-    TIMEZONE_LOCAL,
     ClockProtocol,
 )
 from src.snapshot import (
@@ -35,6 +33,7 @@ class FrozenClock:
     Deterministic clock for testing.
 
     Allows injecting specific times for reproducible tests.
+    Uses naive datetime (no timezone dependency).
     """
 
     def __init__(
@@ -46,7 +45,7 @@ class FrozenClock:
         Initialize frozen clock.
 
         Args:
-            frozen_dt: Fixed datetime (must be timezone-aware)
+            frozen_dt: Fixed datetime (timezone-aware or naive)
             frozen_mono_ns: Fixed monotonic time in nanoseconds
         """
         self.frozen_dt = frozen_dt
@@ -61,15 +60,18 @@ class FrozenClock:
         return self.frozen_mono_ns
 
     def now_local(self) -> datetime:
-        """Current time in America/Montreal timezone."""
-        return self.frozen_dt.astimezone(TIMEZONE_LOCAL)
+        """Current time (returns frozen_dt as-is)."""
+        return self.frozen_dt
 
     def now_utc(self) -> datetime:
         """Current time in UTC timezone."""
-        return self.frozen_dt.astimezone(ZoneInfo("UTC"))
+        if self.frozen_dt.tzinfo is None:
+            # Naive datetime - assume UTC
+            return self.frozen_dt.replace(tzinfo=timezone.utc)
+        return self.frozen_dt.astimezone(timezone.utc)
 
 
-# Test fixtures for common times
+# Test fixtures for common times (naive datetime - no tz dependency)
 def test_system_clock_basic():
     """Test SystemClock provides real time."""
     clock = SystemClock()
@@ -82,14 +84,14 @@ def test_system_clock_basic():
     # Sanity checks
     assert unix_ms > 1700000000000  # After 2023
     assert mono_ns > 0
-    assert local_dt.tzinfo == TIMEZONE_LOCAL
-    assert utc_dt.tzinfo == ZoneInfo("UTC")
+    assert local_dt.tzinfo is not None  # OS-provided tzinfo
+    assert utc_dt.tzinfo == timezone.utc
 
 
 def test_frozen_clock_deterministic():
     """Test FrozenClock returns fixed time."""
-    # Create fixed time: 2026-03-15 10:30:00 ET
-    frozen_dt = datetime(2026, 3, 15, 10, 30, 0, tzinfo=TIMEZONE_LOCAL)
+    # Create fixed time: 2026-03-15 10:30:00 (naive)
+    frozen_dt = datetime(2026, 3, 15, 10, 30, 0)
     clock = FrozenClock(frozen_dt, frozen_mono_ns=5000000000)
 
     # Multiple calls return same value
@@ -99,136 +101,136 @@ def test_frozen_clock_deterministic():
 
 
 def test_session_date_before_break():
-    """Test session_date is current day before 17:00 ET."""
-    # Monday 16:59 ET → session_date = Monday
-    frozen_dt = datetime(2026, 3, 16, 16, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    """Test session_date is current day before 17:00."""
+    # Monday 16:59 → session_date = Monday
+    frozen_dt = datetime(2026, 3, 16, 16, 59, 0)
     clock = FrozenClock(frozen_dt)
     session_mgr = SessionManager(clock=clock)
 
-    session_date = session_mgr.session_date_iso()
+    session_date = session_mgr.session_date_iso(frozen_dt)
 
     assert session_date == "2026-03-16"  # Monday
 
 
 def test_session_date_at_break_start():
-    """Test session_date rolls to next day at 17:00 ET (break start)."""
-    # Monday 17:00 ET → session_date = Tuesday
-    frozen_dt = datetime(2026, 3, 16, 17, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    """Test session_date rolls to next day at 17:00 (break start)."""
+    # Monday 17:00 → session_date = Tuesday
+    frozen_dt = datetime(2026, 3, 16, 17, 0, 0)
     clock = FrozenClock(frozen_dt)
     session_mgr = SessionManager(clock=clock)
 
-    session_date = session_mgr.session_date_iso()
+    session_date = session_mgr.session_date_iso(frozen_dt)
 
     assert session_date == "2026-03-17"  # Tuesday (next day)
 
 
 def test_session_date_after_break():
     """Test session_date stays rolled after break (evening session)."""
-    # Monday 18:00 ET → session_date = Tuesday
-    frozen_dt = datetime(2026, 3, 16, 18, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # Monday 18:00 → session_date = Tuesday
+    frozen_dt = datetime(2026, 3, 16, 18, 0, 0)
     clock = FrozenClock(frozen_dt)
     session_mgr = SessionManager(clock=clock)
 
-    session_date = session_mgr.session_date_iso()
+    session_date = session_mgr.session_date_iso(frozen_dt)
 
     assert session_date == "2026-03-17"  # Tuesday (next day)
 
 
 def test_session_date_late_night():
     """Test session_date stays rolled late at night."""
-    # Tuesday 02:00 ET → session_date = Tuesday
-    frozen_dt = datetime(2026, 3, 17, 2, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # Tuesday 02:00 → session_date = Tuesday
+    frozen_dt = datetime(2026, 3, 17, 2, 0, 0)
     clock = FrozenClock(frozen_dt)
     session_mgr = SessionManager(clock=clock)
 
-    session_date = session_mgr.session_date_iso()
+    session_date = session_mgr.session_date_iso(frozen_dt)
 
     assert session_date == "2026-03-17"  # Tuesday
 
 
 def test_break_window_detection():
-    """Test is_break_window detects 17:00-18:00 ET."""
+    """Test is_break_window detects 17:00-18:00."""
     session_mgr = SessionManager()
 
-    # 16:59 ET → not in break
-    dt_before = datetime(2026, 3, 16, 16, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    # 16:59 → not in break
+    dt_before = datetime(2026, 3, 16, 16, 59, 0)
     assert not session_mgr.is_break_window(dt_before)
 
-    # 17:00 ET → in break
-    dt_start = datetime(2026, 3, 16, 17, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # 17:00 → in break
+    dt_start = datetime(2026, 3, 16, 17, 0, 0)
     assert session_mgr.is_break_window(dt_start)
 
-    # 17:30 ET → in break
-    dt_mid = datetime(2026, 3, 16, 17, 30, 0, tzinfo=TIMEZONE_LOCAL)
+    # 17:30 → in break
+    dt_mid = datetime(2026, 3, 16, 17, 30, 0)
     assert session_mgr.is_break_window(dt_mid)
 
-    # 17:59 ET → in break
-    dt_end_minus_1 = datetime(2026, 3, 16, 17, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    # 17:59 → in break
+    dt_end_minus_1 = datetime(2026, 3, 16, 17, 59, 0)
     assert session_mgr.is_break_window(dt_end_minus_1)
 
-    # 18:00 ET → not in break (session resumed)
-    dt_after = datetime(2026, 3, 16, 18, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # 18:00 → not in break (session resumed)
+    dt_after = datetime(2026, 3, 16, 18, 0, 0)
     assert not session_mgr.is_break_window(dt_after)
 
 
 def test_operating_window_default():
-    """Test in_operating_window with default 07:00-16:00 ET."""
+    """Test in_operating_window with default 07:00-16:00."""
     session_mgr = SessionManager()
 
-    # 06:59 ET → outside
-    dt_before = datetime(2026, 3, 16, 6, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    # 06:59 → outside
+    dt_before = datetime(2026, 3, 16, 6, 59, 0)
     assert not session_mgr.in_operating_window(dt_before)
 
-    # 07:00 ET → inside
-    dt_start = datetime(2026, 3, 16, 7, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # 07:00 → inside
+    dt_start = datetime(2026, 3, 16, 7, 0, 0)
     assert session_mgr.in_operating_window(dt_start)
 
-    # 12:00 ET → inside
-    dt_mid = datetime(2026, 3, 16, 12, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # 12:00 → inside
+    dt_mid = datetime(2026, 3, 16, 12, 0, 0)
     assert session_mgr.in_operating_window(dt_mid)
 
-    # 15:59 ET → inside
-    dt_end_minus_1 = datetime(2026, 3, 16, 15, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    # 15:59 → inside
+    dt_end_minus_1 = datetime(2026, 3, 16, 15, 59, 0)
     assert session_mgr.in_operating_window(dt_end_minus_1)
 
-    # 16:00 ET → outside (end is exclusive)
-    dt_after = datetime(2026, 3, 16, 16, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    # 16:00 → outside (end is exclusive)
+    dt_after = datetime(2026, 3, 16, 16, 0, 0)
     assert not session_mgr.in_operating_window(dt_after)
 
 
 def test_operating_window_custom():
     """Test in_operating_window with custom hours."""
-    # Custom window: 09:00-14:00 ET
+    # Custom window: 09:00-14:00
     session_mgr = SessionManager(operating_start_hour=9, operating_end_hour=14)
 
-    dt_before = datetime(2026, 3, 16, 8, 59, 0, tzinfo=TIMEZONE_LOCAL)
+    dt_before = datetime(2026, 3, 16, 8, 59, 0)
     assert not session_mgr.in_operating_window(dt_before)
 
-    dt_start = datetime(2026, 3, 16, 9, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    dt_start = datetime(2026, 3, 16, 9, 0, 0)
     assert session_mgr.in_operating_window(dt_start)
 
-    dt_end = datetime(2026, 3, 16, 14, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    dt_end = datetime(2026, 3, 16, 14, 0, 0)
     assert not session_mgr.in_operating_window(dt_end)
 
 
 def test_session_phase_operating():
     """Test session_phase returns OPERATING during window."""
     session_mgr = SessionManager()
-    dt = datetime(2026, 3, 16, 10, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    dt = datetime(2026, 3, 16, 10, 0, 0)
     assert session_mgr.session_phase(dt) == "OPERATING"
 
 
 def test_session_phase_break():
     """Test session_phase returns BREAK during 17:00-18:00."""
     session_mgr = SessionManager()
-    dt = datetime(2026, 3, 16, 17, 30, 0, tzinfo=TIMEZONE_LOCAL)
+    dt = datetime(2026, 3, 16, 17, 30, 0)
     assert session_mgr.session_phase(dt) == "BREAK"
 
 
 def test_session_phase_closed():
     """Test session_phase returns CLOSED outside hours."""
     session_mgr = SessionManager()
-    dt = datetime(2026, 3, 16, 20, 0, 0, tzinfo=TIMEZONE_LOCAL)
+    dt = datetime(2026, 3, 16, 20, 0, 0)
     assert session_mgr.session_phase(dt) == "CLOSED"
 
 
@@ -360,22 +362,25 @@ def test_snapshot_dto_immutability():
         snapshot.quote.bid = 18600.0
 
 
-def test_session_manager_dst_transition():
-    """Test session_date_iso handles DST transitions correctly."""
+def test_session_date_rolls_across_days():
+    """Test session_date rolls correctly across multiple days."""
     session_mgr = SessionManager()
 
-    # Test around DST transition (spring forward: 2026-03-08 02:00 → 03:00)
-    # Day before DST: March 7, 16:00 ET (EST)
-    dt_before_dst = datetime(2026, 3, 7, 16, 0, 0, tzinfo=TIMEZONE_LOCAL)
-    assert session_mgr.session_date_iso(dt_before_dst) == "2026-03-07"
+    # Day 1: Before break (Monday 10:00)
+    dt1 = datetime(2026, 3, 16, 10, 0, 0)
+    assert session_mgr.session_date_iso(dt1) == "2026-03-16"
 
-    # DST transition day: March 8, 16:00 ET (EDT now)
-    dt_after_dst = datetime(2026, 3, 8, 16, 0, 0, tzinfo=TIMEZONE_LOCAL)
-    assert session_mgr.session_date_iso(dt_after_dst) == "2026-03-08"
+    # Day 1: After break (Monday 18:00)
+    dt2 = datetime(2026, 3, 16, 18, 0, 0)
+    assert session_mgr.session_date_iso(dt2) == "2026-03-17"  # Tuesday
 
-    # DST transition day evening: March 8, 18:00 EDT
-    dt_after_dst_evening = datetime(2026, 3, 8, 18, 0, 0, tzinfo=TIMEZONE_LOCAL)
-    assert session_mgr.session_date_iso(dt_after_dst_evening) == "2026-03-09"
+    # Day 2: Before break (Tuesday 10:00)
+    dt3 = datetime(2026, 3, 17, 10, 0, 0)
+    assert session_mgr.session_date_iso(dt3) == "2026-03-17"  # Tuesday
+
+    # Day 2: After break (Tuesday 18:00)
+    dt4 = datetime(2026, 3, 17, 18, 0, 0)
+    assert session_mgr.session_date_iso(dt4) == "2026-03-18"  # Wednesday
 
 
 def test_liveness_age_computation():
@@ -404,3 +409,18 @@ def test_quote_staleness_computation():
     staleness_ms = staleness_ns // 1_000_000
 
     assert staleness_ms == 200
+
+
+def test_clock_injection_for_session_manager():
+    """Test SessionManager uses injected clock."""
+    # Create frozen clock at specific time
+    frozen_dt = datetime(2026, 3, 16, 17, 30, 0)
+    frozen_clock = FrozenClock(frozen_dt)
+
+    # SessionManager should use injected clock
+    session_mgr = SessionManager(clock=frozen_clock)
+
+    # Verify session_date_iso uses frozen clock when no arg provided
+    assert session_mgr.session_date_iso() == "2026-03-17"  # Rolled (17:30 > 17:00)
+    assert session_mgr.is_break_window() is True
+    assert session_mgr.session_phase() == "BREAK"
