@@ -66,6 +66,14 @@ class MinimalCLI:
         if len(reasons) > 30:
             reasons = reasons[:27] + "..."
 
+        session_phase = snapshot.session.session_phase
+        staleness = (
+            f"{snapshot.quote.staleness_ms}ms"
+            if snapshot.quote.staleness_ms is not None
+            else "NA"
+        )
+        feed_state = "DEGRADED" if snapshot.feed.degraded else "OK"
+
         # Single-line status display (J2: nested fields)
         status_line = (
             f"[{snapshot.snapshot_id:05d}] "
@@ -73,6 +81,9 @@ class MinimalCLI:
             f"intent={snapshot.controls.intent:5s} | "
             f"arm={str(snapshot.controls.arm):5s} | "
             f"cycle={snapshot.loop.cycle_ms:3d}ms | "
+            f"session={session_phase:9s} | "
+            f"stale={staleness:>6s} | "
+            f"feed={feed_state:8s} | "
             f"reasons={reasons}"
         )
 
