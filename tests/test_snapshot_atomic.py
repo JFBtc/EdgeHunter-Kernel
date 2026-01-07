@@ -34,17 +34,17 @@ def test_snapshot_atomic_complete_object():
             assert snapshot is not None, "Snapshot should not be None after engine starts"
             assert isinstance(snapshot, SnapshotDTO), "Snapshot must be SnapshotDTO instance"
 
-            # Verify required fields are present and valid
+            # Verify required fields are present and valid (J2: nested structure)
             assert snapshot.schema_version == "snapshot.v1", "Schema version must be set"
             assert snapshot.run_id, "run_id must be set"
             assert snapshot.snapshot_id > 0, "snapshot_id must be positive"
             assert snapshot.ts_unix_ms > 0, "ts_unix_ms must be positive"
-            assert isinstance(snapshot.intent, str), "intent must be string"
-            assert isinstance(snapshot.arm, bool), "arm must be boolean"
-            assert isinstance(snapshot.allowed, bool), "allowed must be boolean"
-            assert isinstance(snapshot.reason_codes, list), "reason_codes must be list"
-            assert isinstance(snapshot.cycle_ms, int), "cycle_ms must be int"
-            assert isinstance(snapshot.engine_degraded, bool), "engine_degraded must be boolean"
+            assert isinstance(snapshot.controls.intent, str), "intent must be string"
+            assert isinstance(snapshot.controls.arm, bool), "arm must be boolean"
+            assert isinstance(snapshot.gates.allowed, bool), "allowed must be boolean"
+            assert isinstance(snapshot.gates.reason_codes, list), "reason_codes must be list"
+            assert isinstance(snapshot.loop.cycle_ms, int), "cycle_ms must be int"
+            assert isinstance(snapshot.loop.engine_degraded, bool), "engine_degraded must be boolean"
             assert isinstance(snapshot.extras, dict), "extras must be dict"
 
             time.sleep(0.05)
@@ -157,8 +157,8 @@ def test_snapshot_no_partial_updates():
                     prev = seen_snapshots[sid]
                     assert prev.run_id == snapshot.run_id, "run_id changed for same snapshot_id"
                     assert prev.ts_unix_ms == snapshot.ts_unix_ms, "ts_unix_ms changed for same snapshot_id"
-                    assert prev.intent == snapshot.intent, "intent changed for same snapshot_id"
-                    assert prev.arm == snapshot.arm, "arm changed for same snapshot_id"
+                    assert prev.controls.intent == snapshot.controls.intent, "intent changed for same snapshot_id"
+                    assert prev.controls.arm == snapshot.controls.arm, "arm changed for same snapshot_id"
                 else:
                     seen_snapshots[sid] = snapshot
 

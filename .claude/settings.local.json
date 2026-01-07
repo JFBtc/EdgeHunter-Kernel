@@ -14,7 +14,20 @@
       "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest -v)",
       "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m pytest:*)",
       "Bash(set MAX_RUNTIME_S=3)",
-      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main)"
+      "Bash(\"c:\\\\Users\\\\barsa\\\\Desktop\\\\dev\\\\EH_cloudcode\\\\venv\\\\Scripts\\\\python.exe\" -m src.main)",
+      "Bash(git rev-parse:*)",
+      "Bash(set MAX_RUNTIME_S=20:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m src.main:*)",
+      "Bash(findstr pytest:*)",
+      "Bash(venv/Scripts/python.exe -m pytest:*)",
+      "Bash(./venv/Scripts/python.exe -m pytest -q)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(/c/Users/barsa/AppData/Local/Programs/Python/Python311/python -m pytest:*)",
+      "Bash(/c/Users/barsa/AppData/Local/Programs/Python/Python311/python -m pip install:*)",
+      "Bash(git checkout:*)",
+      "Bash(git worktree:*)",
+      "Bash(git branch:*)"
     ]
   }
 }

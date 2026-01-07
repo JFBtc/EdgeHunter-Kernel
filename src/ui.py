@@ -61,18 +61,18 @@ class MinimalCLI:
             print("\r[WAITING] No snapshot published yet" + " " * 40, end="", flush=True)
             return
 
-        # Format reason codes
-        reasons = ",".join(snapshot.reason_codes) if snapshot.reason_codes else "NONE"
+        # Format reason codes (J2: nested in gates)
+        reasons = ",".join(snapshot.gates.reason_codes) if snapshot.gates.reason_codes else "NONE"
         if len(reasons) > 30:
             reasons = reasons[:27] + "..."
 
-        # Single-line status display
+        # Single-line status display (J2: nested fields)
         status_line = (
             f"[{snapshot.snapshot_id:05d}] "
-            f"allowed={str(snapshot.allowed):5s} | "
-            f"intent={snapshot.intent:5s} | "
-            f"arm={str(snapshot.arm):5s} | "
-            f"cycle={snapshot.cycle_ms:3d}ms | "
+            f"allowed={str(snapshot.gates.allowed):5s} | "
+            f"intent={snapshot.controls.intent:5s} | "
+            f"arm={str(snapshot.controls.arm):5s} | "
+            f"cycle={snapshot.loop.cycle_ms:3d}ms | "
             f"reasons={reasons}"
         )
 
