@@ -7,6 +7,7 @@ V1a J1: Separate from engine loop to avoid blocking engine cycles.
 Future milestone (J3): Engine will drain inbound queue and process events.
 For now (J1): Just proves adapter→queue flow works.
 """
+import asyncio
 import threading
 import time
 import logging
@@ -55,15 +56,41 @@ class AdapterRunner:
         Adapter event loop: process ib_insync events.
 
         Runs at ~100 Hz to ensure responsive callback handling.
+
+        Creates an asyncio event loop for this thread (required for ib_insync).
         """
-        while self._running:
+        # Create and set event loop for this thread
+        # (Required for ib_insync.IB.waitOnUpdate() to work)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            while self._running:
+                try:
+                    # Process one iteration of ib_insync event loop
+                    self.adapter.run_event_loop_iteration()
+
+                    # Small sleep to avoid busy-wait (10ms = 100 Hz)
+                    time.sleep(0.01)
+
+                except Exception as e:
+                    logger.error(f"Adapter event loop error: {e}", exc_info=True)
+                    time.sleep(1.0)  # Back off on errors
+
+        finally:
+            # Clean up event loop on thread shutdown
             try:
-                # Process one iteration of ib_insync event loop
-                self.adapter.run_event_loop_iteration()
+                # Cancel all pending tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
 
-                # Small sleep to avoid busy-wait (10ms = 100 Hz)
-                time.sleep(0.01)
+                # Run loop briefly to process cancellations
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
 
+                # Close the loop
+                loop.close()
+                logger.debug("Adapter runner event loop closed")
             except Exception as e:
-                logger.error(f"Adapter event loop error: {e}", exc_info=True)
-                time.sleep(1.0)  # Back off on errors
+                logger.error(f"Error closing event loop: {e}")

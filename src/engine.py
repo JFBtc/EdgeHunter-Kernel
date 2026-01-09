@@ -75,6 +75,9 @@ class EngineLoop:
         self._feed_status_reason_codes: list[str] = []
         self._feed_last_status_change_mono_ns: Optional[int] = None
 
+        # Contract identity (from QuoteEvent)
+        self._con_id: Optional[int] = None
+
         self._quote_bid: Optional[float] = None
         self._quote_ask: Optional[float] = None
         self._quote_last: Optional[float] = None
@@ -188,7 +191,7 @@ class EngineLoop:
             is_break_window=is_break,
             feed_connected=self._feed_connected,
             md_mode=self._md_mode,
-            con_id=InstrumentDTO().con_id,
+            con_id=self._con_id,
             bid=self._quote_bid,
             ask=self._quote_ask,
             last=self._quote_last,
@@ -221,7 +224,7 @@ class EngineLoop:
             cycle_count=self._snapshot_id,
             ts_unix_ms=cycle_start_unix_ms,
             ts_mono_ns=cycle_start_mono_ns,
-            instrument=InstrumentDTO(),
+            instrument=InstrumentDTO(con_id=self._con_id),
             feed=FeedDTO(
                 connected=self._feed_connected,
                 md_mode=self._md_mode,
@@ -287,21 +290,37 @@ class EngineLoop:
             self._last_any_event_mono_ns = event.ts_recv_mono_ns
 
             if isinstance(event, QuoteEvent):
-                self._last_quote_event_mono_ns = event.ts_recv_mono_ns
-                self._quotes_received_count += 1
-                if event.bid is not None:
-                    self._quote_bid = event.bid
-                if event.ask is not None:
-                    self._quote_ask = event.ask
-                if event.last is not None:
-                    self._quote_last = event.last
-                if event.bid_size is not None:
-                    self._quote_bid_size = event.bid_size
-                if event.ask_size is not None:
-                    self._quote_ask_size = event.ask_size
-                self._quote_ts_recv_unix_ms = event.ts_recv_unix_ms
-                self._quote_ts_recv_mono_ns = event.ts_recv_mono_ns
-                self._quote_ts_exch_unix_ms = event.ts_exch_unix_ms
+                # Store contract identity from quote (even if no price data yet)
+                if event.con_id is not None:
+                    self._con_id = event.con_id
+
+                # Check if this is a real quote (has at least one price field)
+                is_real_quote = (
+                    event.bid is not None or
+                    event.ask is not None or
+                    event.last is not None
+                )
+
+                # Only update quote data and timestamps if this is a real quote
+                # Contract-only QuoteEvent clears NO_CONTRACT but doesn't affect staleness
+                if is_real_quote:
+                    self._last_quote_event_mono_ns = event.ts_recv_mono_ns
+                    self._quotes_received_count += 1
+
+                    if event.bid is not None:
+                        self._quote_bid = event.bid
+                    if event.ask is not None:
+                        self._quote_ask = event.ask
+                    if event.last is not None:
+                        self._quote_last = event.last
+                    if event.bid_size is not None:
+                        self._quote_bid_size = event.bid_size
+                    if event.ask_size is not None:
+                        self._quote_ask_size = event.ask_size
+
+                    self._quote_ts_recv_unix_ms = event.ts_recv_unix_ms
+                    self._quote_ts_recv_mono_ns = event.ts_recv_mono_ns
+                    self._quote_ts_exch_unix_ms = event.ts_exch_unix_ms
             elif isinstance(event, StatusEvent):
                 prev_connected = self._feed_connected
                 prev_md_mode = self._md_mode

@@ -3,10 +3,11 @@
 # Runs the engine for extended duration (default 4 hours) to validate stability.
 #
 # Usage:
-#   .\soak_run.ps1                    # 4 hour soak with MOCK feed
-#   .\soak_run.ps1 -Duration 14400    # 4 hours (14400 seconds)
-#   .\soak_run.ps1 -Duration 3600     # 1 hour test
-#   .\soak_run.ps1 -FeedType IBKR     # Use real IBKR feed (requires credentials)
+#   .\soak_run.ps1                             # 4 hour soak with MOCK feed
+#   .\soak_run.ps1 -Duration 14400             # 4 hours (14400 seconds)
+#   .\soak_run.ps1 -Duration 3600              # 1 hour test
+#   .\soak_run.ps1 -FeedType IBKR              # Use real IBKR feed (requires TWS and config)
+#   .\soak_run.ps1 -FeedType IBKR -IBKRHost "127.0.0.1" -IBKRPort 7497 -IBKRSymbol "MNQ" -IBKRExpiry "202603"
 #
 # After completion:
 #   - Check console for shutdown summary report
@@ -14,8 +15,15 @@
 #   - Review metrics: uptime_s, reconnect_count, staleness_events_count, max_cycle_time_ms
 
 param(
-    [int]$Duration = 14400,  # Default: 4 hours (14400 seconds)
-    [string]$FeedType = "MOCK"  # MOCK or IBKR
+    [int]$Duration = 14400,         # Default: 4 hours (14400 seconds)
+    [string]$FeedType = "MOCK",     # MOCK or IBKR
+    [string]$IBKRHost = "127.0.0.1",
+    [int]$IBKRPort = 7497,          # TWS paper trading default
+    [int]$IBKRClientId = 1,
+    [string]$IBKRSymbol = "",       # e.g., MNQ
+    [string]$IBKRExpiry = "",       # e.g., 202603 (YYYYMM)
+    [string]$IBKRExchange = "CME",
+    [string]$IBKRCurrency = "USD"
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -58,9 +66,42 @@ if (-not (Test-Path "logs")) {
 # Set environment variables
 $env:MAX_RUNTIME_S = $Duration
 $env:FEED_TYPE = $FeedType
+$env:EDGEHUNTER_FEED = $FeedType  # Backward compatibility alias
 $env:ENABLE_TRIGGERCARD_LOGGER = "true"
 $env:TRIGGERCARD_LOG_DIR = "logs"
 $env:TRIGGERCARD_CADENCE_HZ = "1.0"  # 1 Hz for soak test
+
+# IBKR configuration (if IBKR feed)
+if ($FeedType -eq "IBKR") {
+    $env:IBKR_HOST = $IBKRHost
+    $env:IBKR_PORT = $IBKRPort
+    $env:IBKR_CLIENT_ID = $IBKRClientId
+
+    if ($IBKRSymbol -ne "") {
+        $env:IBKR_SYMBOL = $IBKRSymbol
+    }
+    if ($IBKRExpiry -ne "") {
+        $env:IBKR_EXPIRY = $IBKRExpiry
+    }
+    if ($IBKRExchange -ne "") {
+        $env:IBKR_EXCHANGE = $IBKRExchange
+    }
+    if ($IBKRCurrency -ne "") {
+        $env:IBKR_CURRENCY = $IBKRCurrency
+    }
+
+    Write-Host "IBKR Configuration:" -ForegroundColor Yellow
+    Write-Host "  Host: $IBKRHost" -ForegroundColor White
+    Write-Host "  Port: $IBKRPort" -ForegroundColor White
+    Write-Host "  Client ID: $IBKRClientId" -ForegroundColor White
+
+    if ($IBKRSymbol -ne "" -and $IBKRExpiry -ne "") {
+        Write-Host "  Contract: $IBKRSymbol.$IBKRExpiry ($IBKRExchange $IBKRCurrency)" -ForegroundColor White
+    } else {
+        Write-Host "  Contract: Using environment defaults or not configured" -ForegroundColor Yellow
+        Write-Host "  WARNING: Set IBKR_SYMBOL and IBKR_EXPIRY for live feed" -ForegroundColor Yellow
+    }
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
