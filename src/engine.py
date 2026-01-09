@@ -13,6 +13,7 @@ from src.command_queue import CommandQueue
 from src.event_queue import InboundQueue
 from src.events import AdapterErrorEvent, QuoteEvent, StatusEvent
 from src.gates import GateInputs, evaluate_hard_gates
+from src.triggercard_logger import TriggerCardLogger
 from src.snapshot import (
     ControlsDTO,
     FeedDTO,
@@ -41,6 +42,7 @@ class EngineLoop:
         overrun_threshold_ms: int = 500,
         inbound_queue: Optional[InboundQueue] = None,
         command_queue: Optional[CommandQueue] = None,
+        triggercard_logger: Optional[TriggerCardLogger] = None,
         clock: Optional[ClockProtocol] = None,
     ):
         self.datahub = datahub
@@ -48,6 +50,7 @@ class EngineLoop:
         self.overrun_threshold_ms = overrun_threshold_ms
         self.inbound_queue = inbound_queue
         self.command_queue = command_queue
+        self.triggercard_logger = triggercard_logger
         self.clock = clock or SystemClock()
         self.session_mgr = SessionManager(clock=self.clock)
 
@@ -72,6 +75,9 @@ class EngineLoop:
         self._feed_status_reason_codes: list[str] = []
         self._feed_last_status_change_mono_ns: Optional[int] = None
 
+        # Contract identity (from QuoteEvent)
+        self._con_id: Optional[int] = None
+
         self._quote_bid: Optional[float] = None
         self._quote_ask: Optional[float] = None
         self._quote_last: Optional[float] = None
@@ -84,6 +90,12 @@ class EngineLoop:
         self._last_any_event_mono_ns: Optional[int] = None
         self._last_quote_event_mono_ns: Optional[int] = None
         self._quotes_received_count = 0
+
+        # J7: Soak test metrics
+        self._reconnect_count = 0
+        self._staleness_events_count = 0
+        self._max_cycle_time_ms = 0
+        self._soak_end_ts_unix_ms: Optional[int] = None
 
     def start(self) -> None:
         """Start the engine loop in a background thread."""
@@ -100,6 +112,16 @@ class EngineLoop:
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
+
+        # Capture end timestamp
+        self._soak_end_ts_unix_ms = self.clock.now_unix_ms()
+
+        # Close TriggerCard logger if present
+        if self.triggercard_logger:
+            self.triggercard_logger.close()
+
+        # Print J7 Soak Summary Report
+        self._print_soak_summary()
 
     def _run_loop(self) -> None:
         """
@@ -169,7 +191,7 @@ class EngineLoop:
             is_break_window=is_break,
             feed_connected=self._feed_connected,
             md_mode=self._md_mode,
-            con_id=InstrumentDTO().con_id,
+            con_id=self._con_id,
             bid=self._quote_bid,
             ask=self._quote_ask,
             last=self._quote_last,
@@ -181,11 +203,18 @@ class EngineLoop:
         )
         allowed, reasons, gate_metrics = evaluate_hard_gates(gate_inputs)
 
+        # J7: Track staleness events
+        if "STALE_DATA" in reasons:
+            self._staleness_events_count += 1
+
         # Final cycle time after gates
         cycle_elapsed_ms = int(
             (self.clock.now_mono_ns() - cycle_start_mono_ns) / 1_000_000
         )
         cycle_overrun = cycle_elapsed_ms > self.cycle_target_ms
+
+        # J7: Track max cycle time
+        self._max_cycle_time_ms = max(self._max_cycle_time_ms, cycle_elapsed_ms)
 
         snapshot = SnapshotDTO(
             schema_version="snapshot.v1",
@@ -195,7 +224,7 @@ class EngineLoop:
             cycle_count=self._snapshot_id,
             ts_unix_ms=cycle_start_unix_ms,
             ts_mono_ns=cycle_start_mono_ns,
-            instrument=InstrumentDTO(),
+            instrument=InstrumentDTO(con_id=self._con_id),
             feed=FeedDTO(
                 connected=self._feed_connected,
                 md_mode=self._md_mode,
@@ -246,6 +275,11 @@ class EngineLoop:
         )
 
         self.datahub.publish(snapshot)
+
+        # Tick TriggerCard logger (J6: fixed cadence, decoupled from loop speed)
+        if self.triggercard_logger:
+            self.triggercard_logger.tick(cycle_start_mono_ns, snapshot)
+
         return cycle_elapsed_ms
 
     def _drain_inbound_events(self) -> None:
@@ -256,21 +290,37 @@ class EngineLoop:
             self._last_any_event_mono_ns = event.ts_recv_mono_ns
 
             if isinstance(event, QuoteEvent):
-                self._last_quote_event_mono_ns = event.ts_recv_mono_ns
-                self._quotes_received_count += 1
-                if event.bid is not None:
-                    self._quote_bid = event.bid
-                if event.ask is not None:
-                    self._quote_ask = event.ask
-                if event.last is not None:
-                    self._quote_last = event.last
-                if event.bid_size is not None:
-                    self._quote_bid_size = event.bid_size
-                if event.ask_size is not None:
-                    self._quote_ask_size = event.ask_size
-                self._quote_ts_recv_unix_ms = event.ts_recv_unix_ms
-                self._quote_ts_recv_mono_ns = event.ts_recv_mono_ns
-                self._quote_ts_exch_unix_ms = event.ts_exch_unix_ms
+                # Store contract identity from quote (even if no price data yet)
+                if event.con_id is not None:
+                    self._con_id = event.con_id
+
+                # Check if this is a real quote (has at least one price field)
+                is_real_quote = (
+                    event.bid is not None or
+                    event.ask is not None or
+                    event.last is not None
+                )
+
+                # Only update quote data and timestamps if this is a real quote
+                # Contract-only QuoteEvent clears NO_CONTRACT but doesn't affect staleness
+                if is_real_quote:
+                    self._last_quote_event_mono_ns = event.ts_recv_mono_ns
+                    self._quotes_received_count += 1
+
+                    if event.bid is not None:
+                        self._quote_bid = event.bid
+                    if event.ask is not None:
+                        self._quote_ask = event.ask
+                    if event.last is not None:
+                        self._quote_last = event.last
+                    if event.bid_size is not None:
+                        self._quote_bid_size = event.bid_size
+                    if event.ask_size is not None:
+                        self._quote_ask_size = event.ask_size
+
+                    self._quote_ts_recv_unix_ms = event.ts_recv_unix_ms
+                    self._quote_ts_recv_mono_ns = event.ts_recv_mono_ns
+                    self._quote_ts_exch_unix_ms = event.ts_exch_unix_ms
             elif isinstance(event, StatusEvent):
                 prev_connected = self._feed_connected
                 prev_md_mode = self._md_mode
@@ -284,6 +334,9 @@ class EngineLoop:
                     self._feed_status_reason_codes = [event.reason]
                 if (self._feed_connected != prev_connected) or (self._md_mode != prev_md_mode):
                     self._feed_last_status_change_mono_ns = event.ts_recv_mono_ns
+                    # J7: Track reconnects (transition from disconnected to connected)
+                    if not prev_connected and self._feed_connected:
+                        self._reconnect_count += 1
             elif isinstance(event, AdapterErrorEvent):
                 if event.error_msg:
                     self._feed_status_reason_codes = [event.error_msg]
@@ -310,3 +363,45 @@ class EngineLoop:
         if batch.last_cmd_id > 0:
             self._last_cmd_id = batch.last_cmd_id
             self._last_cmd_ts_unix_ms = batch.last_cmd_ts_unix_ms
+
+    def _print_soak_summary(self) -> None:
+        """
+        Print J7 Soak Test Summary Report on shutdown.
+
+        Includes:
+        - uptime_s
+        - reconnect_count
+        - staleness_events_count
+        - logger_status (if present)
+        - max_cycle_time_ms
+        """
+        print("\n" + "=" * 80)
+        print("V1a J7 SOAK TEST SUMMARY REPORT")
+        print("=" * 80)
+
+        # Compute uptime
+        end_ts = self._soak_end_ts_unix_ms or self.clock.now_unix_ms()
+        uptime_s = (end_ts - self._run_start_ts_unix_ms) / 1000.0
+
+        print(f"run_id: {self.run_id}")
+        print(f"run_start_ts_unix_ms: {self._run_start_ts_unix_ms}")
+        print(f"run_end_ts_unix_ms: {end_ts}")
+        print(f"uptime_s: {uptime_s:.2f}")
+        print(f"reconnect_count: {self._reconnect_count}")
+        print(f"staleness_events_count: {self._staleness_events_count}")
+        print(f"max_cycle_time_ms: {self._max_cycle_time_ms}")
+
+        # Logger status
+        if self.triggercard_logger:
+            print(f"logger_enabled: true")
+            print(f"logger_cadence_hz: {1_000_000_000 / self.triggercard_logger.cadence_interval_ns:.2f}")
+            if self.triggercard_logger._current_date:
+                log_dir = self.triggercard_logger.log_dir
+                filename = f"triggercards_{self.triggercard_logger._current_date}_{self.run_id}.jsonl"
+                print(f"logger_last_file: {log_dir / filename}")
+        else:
+            print(f"logger_enabled: false")
+
+        print("=" * 80)
+        print("SHUTDOWN COMPLETE")
+        print("=" * 80 + "\n")

@@ -127,15 +127,32 @@ class IBKRAdapter:
         self._reconnect_attempts_window: list[float] = []
         self._reconnect_backoff_delay: float = config.reconnect_backoff_base_s
 
+        # Strong references to callbacks (avoid EventKit weakref issues)
+        # Store lambdas that capture self strongly to prevent missing-self errors
+        self._cb_connected = lambda *args: self._on_connected(*args)
+        self._cb_disconnected = lambda *args: self._on_disconnected(*args)
+        self._cb_error = lambda *args: self._on_error(*args)
+        self._cb_pending_tickers = lambda *args: self._on_pending_tickers(*args)
+
         # Register ib_insync callbacks
         self._register_callbacks()
 
     def _register_callbacks(self) -> None:
-        """Register ib_insync event handlers (J1 requirement)."""
-        self.ib.connectedEvent += self._on_connected
-        self.ib.disconnectedEvent += self._on_disconnected
-        self.ib.errorEvent += self._on_error
-        self.ib.pendingTickersEvent += self._on_pending_tickers
+        """Register ib_insync event handlers with strong references (J1 requirement)."""
+        self.ib.connectedEvent += self._cb_connected
+        self.ib.disconnectedEvent += self._cb_disconnected
+        self.ib.errorEvent += self._cb_error
+        self.ib.pendingTickersEvent += self._cb_pending_tickers
+
+    def _unregister_callbacks(self) -> None:
+        """Unregister ib_insync event handlers before disconnect."""
+        try:
+            self.ib.connectedEvent -= self._cb_connected
+            self.ib.disconnectedEvent -= self._cb_disconnected
+            self.ib.errorEvent -= self._cb_error
+            self.ib.pendingTickersEvent -= self._cb_pending_tickers
+        except Exception as e:
+            logger.debug(f"Error unregistering callbacks: {e}")
 
     def connect(self) -> bool:
         """
@@ -197,6 +214,9 @@ class IBKRAdapter:
 
     def disconnect(self) -> None:
         """Disconnect from IBKR cleanly (J1 requirement)."""
+        # Unregister callbacks first to prevent late events during teardown
+        self._unregister_callbacks()
+
         if self.ib.isConnected():
             logger.info("Disconnecting from IBKR")
             self.ib.disconnect()
@@ -255,6 +275,20 @@ class IBKRAdapter:
 
             # Mark as desired subscription (idempotent manager)
             self._desired_subscriptions[self._con_id] = self._contract
+
+            # Emit initial QuoteEvent with con_id to establish contract presence
+            # This clears NO_CONTRACT gate immediately, even before market data arrives
+            initial_quote = QuoteEvent(
+                ts_recv_mono_ns=time.perf_counter_ns(),
+                ts_recv_unix_ms=int(time.time() * 1000),
+                con_id=self._con_id,
+                # No bid/ask/last yet - will be filled by actual market data
+            )
+            try:
+                self.inbound_queue.push(initial_quote)
+                logger.debug(f"Emitted initial QuoteEvent for conId={self._con_id}")
+            except Exception as e:
+                logger.error(f"Failed to push initial QuoteEvent: {e}")
 
             return True
 
@@ -360,6 +394,17 @@ class IBKRAdapter:
 
         J1 requirement: Fail-fast on clientId collision (error 326).
         """
+        # Informational "connection OK" messages (not errors)
+        # 2104: Market data farm connection is OK
+        # 2106: HMDS data farm connection is OK
+        # 2158: Sec-def data farm connection is OK
+        info_codes = {2104, 2106, 2158}
+
+        if errorCode in info_codes:
+            logger.info(f"IBKR info {errorCode}: {errorString}")
+            return
+
+        # Log as error for actual errors
         logger.error(f"IBKR error {errorCode}: {errorString} (reqId={reqId})")
 
         # FATAL: clientId collision (J1 requirement)

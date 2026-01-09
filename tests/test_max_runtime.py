@@ -21,6 +21,16 @@ def test_max_runtime_env_var():
     env = os.environ.copy()
     env["MAX_RUNTIME_S"] = "1"
 
+    # Force MOCK feed for deterministic timing (avoid IBKR connect/qualify overhead)
+    # Set both FEED_TYPE and EDGEHUNTER_FEED to override any inherited env
+    env["FEED_TYPE"] = "MOCK"
+    env["EDGEHUNTER_FEED"] = "MOCK"
+
+    # Strip IBKR configuration to prevent accidental slow paths
+    for key in ["IBKR_HOST", "IBKR_PORT", "IBKR_CLIENT_ID", "IBKR_SYMBOL",
+                "IBKR_EXPIRY", "IBKR_EXCHANGE", "IBKR_CURRENCY"]:
+        env.pop(key, None)
+
     # Run the program
     start = time.perf_counter()
     result = subprocess.run(
@@ -54,6 +64,15 @@ def test_max_runtime_invalid_value():
     env = os.environ.copy()
     env["MAX_RUNTIME_S"] = "invalid"
 
+    # Force MOCK feed for deterministic timing (avoid IBKR connect/qualify overhead)
+    env["FEED_TYPE"] = "MOCK"
+    env["EDGEHUNTER_FEED"] = "MOCK"
+
+    # Strip IBKR configuration to prevent accidental slow paths
+    for key in ["IBKR_HOST", "IBKR_PORT", "IBKR_CLIENT_ID", "IBKR_SYMBOL",
+                "IBKR_EXPIRY", "IBKR_EXCHANGE", "IBKR_CURRENCY"]:
+        env.pop(key, None)
+
     # Run for very short duration via command-line arg
     result = subprocess.run(
         [venv_python, "-m", "src.main", "1"],
@@ -81,6 +100,15 @@ def test_max_runtime_float_value():
 
     env = os.environ.copy()
     env["MAX_RUNTIME_S"] = "0.5"
+
+    # Force MOCK feed for deterministic timing (avoid IBKR connect/qualify overhead)
+    env["FEED_TYPE"] = "MOCK"
+    env["EDGEHUNTER_FEED"] = "MOCK"
+
+    # Strip IBKR configuration to prevent accidental slow paths
+    for key in ["IBKR_HOST", "IBKR_PORT", "IBKR_CLIENT_ID", "IBKR_SYMBOL",
+                "IBKR_EXPIRY", "IBKR_EXCHANGE", "IBKR_CURRENCY"]:
+        env.pop(key, None)
 
     start = time.perf_counter()
     result = subprocess.run(

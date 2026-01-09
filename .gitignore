@@ -31,3 +31,6 @@ run_*.txt
 Thumbs.db
 .sync_backup/
 J3_candidate.patch
+
+logs/
+
