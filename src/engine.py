@@ -13,6 +13,7 @@ from src.command_queue import CommandQueue
 from src.event_queue import InboundQueue
 from src.events import AdapterErrorEvent, QuoteEvent, StatusEvent
 from src.gates import GateInputs, evaluate_hard_gates
+from src.triggercard_logger import TriggerCardLogger
 from src.snapshot import (
     ControlsDTO,
     FeedDTO,
@@ -41,6 +42,7 @@ class EngineLoop:
         overrun_threshold_ms: int = 500,
         inbound_queue: Optional[InboundQueue] = None,
         command_queue: Optional[CommandQueue] = None,
+        triggercard_logger: Optional[TriggerCardLogger] = None,
         clock: Optional[ClockProtocol] = None,
     ):
         self.datahub = datahub
@@ -48,6 +50,7 @@ class EngineLoop:
         self.overrun_threshold_ms = overrun_threshold_ms
         self.inbound_queue = inbound_queue
         self.command_queue = command_queue
+        self.triggercard_logger = triggercard_logger
         self.clock = clock or SystemClock()
         self.session_mgr = SessionManager(clock=self.clock)
 
@@ -100,6 +103,10 @@ class EngineLoop:
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
+
+        # Close TriggerCard logger if present
+        if self.triggercard_logger:
+            self.triggercard_logger.close()
 
     def _run_loop(self) -> None:
         """
@@ -246,6 +253,11 @@ class EngineLoop:
         )
 
         self.datahub.publish(snapshot)
+
+        # Tick TriggerCard logger (J6: fixed cadence, decoupled from loop speed)
+        if self.triggercard_logger:
+            self.triggercard_logger.tick(cycle_start_mono_ns, snapshot)
+
         return cycle_elapsed_ms
 
     def _drain_inbound_events(self) -> None:
