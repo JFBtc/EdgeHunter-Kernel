@@ -6,6 +6,7 @@ import time
 import sys
 from typing import Optional
 
+from src.command_queue import ArmCommand, CommandQueue, IntentCommand
 from src.datahub import DataHub
 from src.snapshot import SnapshotDTO
 
@@ -14,14 +15,21 @@ class MinimalCLI:
     """
     Minimal CLI that reads and displays snapshots.
 
-    V1a.1 Slice 1: Read-only, no commands yet.
-    Displays snapshot status at fixed interval.
+    V1a-J3: Added command input via CommandQueue (Intent/ARM).
+    UI writes ONLY to CommandQueue; no direct state mutation.
     """
 
-    def __init__(self, datahub: DataHub, display_interval_ms: int = 500):
+    def __init__(
+        self,
+        datahub: DataHub,
+        display_interval_ms: int = 500,
+        command_queue: Optional[CommandQueue] = None,
+    ):
         self.datahub = datahub
         self.display_interval_ms = display_interval_ms
+        self.command_queue = command_queue
         self._running = False
+        self._cmd_id_counter = 0
 
     def run(self, duration_seconds: Optional[float] = None) -> None:
         """
@@ -36,6 +44,8 @@ class MinimalCLI:
 
         print("EdgeHunter Core Kernel V1a.1 - Slice 1")
         print("=" * 80)
+        if self.command_queue:
+            print("Commands: i=Intent(LONG), f=Intent(FLAT), a=ARM(True), d=ARM(False)")
         print("Running... Press Ctrl+C to stop")
         print()
 
@@ -95,3 +105,43 @@ class MinimalCLI:
     def stop(self) -> None:
         """Stop the CLI display loop."""
         self._running = False
+
+    def send_intent_command(self, intent: str) -> None:
+        """
+        Send Intent command via CommandQueue (V1a-J3).
+
+        Args:
+            intent: LONG | SHORT | BOTH | FLAT
+        """
+        if not self.command_queue:
+            return
+        self._cmd_id_counter += 1
+        cmd = IntentCommand(
+            cmd_id=self._cmd_id_counter,
+            ts_unix_ms=int(time.time() * 1000),
+            intent=intent,
+        )
+        try:
+            self.command_queue.push(cmd)
+        except Exception:
+            pass  # Queue full, skip silently
+
+    def send_arm_command(self, arm: bool) -> None:
+        """
+        Send ARM command via CommandQueue (V1a-J3).
+
+        Args:
+            arm: True to arm, False to disarm
+        """
+        if not self.command_queue:
+            return
+        self._cmd_id_counter += 1
+        cmd = ArmCommand(
+            cmd_id=self._cmd_id_counter,
+            ts_unix_ms=int(time.time() * 1000),
+            arm=arm,
+        )
+        try:
+            self.command_queue.push(cmd)
+        except Exception:
+            pass  # Queue full, skip silently

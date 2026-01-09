@@ -9,6 +9,7 @@ import uuid
 from typing import Optional
 
 from src.clock import ClockProtocol, SessionManager, SystemClock
+from src.command_queue import CommandQueue
 from src.event_queue import InboundQueue
 from src.events import AdapterErrorEvent, QuoteEvent, StatusEvent
 from src.gates import GateInputs, evaluate_hard_gates
@@ -39,12 +40,14 @@ class EngineLoop:
         cycle_target_ms: int = 100,  # 10 Hz
         overrun_threshold_ms: int = 500,
         inbound_queue: Optional[InboundQueue] = None,
+        command_queue: Optional[CommandQueue] = None,
         clock: Optional[ClockProtocol] = None,
     ):
         self.datahub = datahub
         self.cycle_target_ms = cycle_target_ms
         self.overrun_threshold_ms = overrun_threshold_ms
         self.inbound_queue = inbound_queue
+        self.command_queue = command_queue
         self.clock = clock or SystemClock()
         self.session_mgr = SessionManager(clock=self.clock)
 
@@ -60,6 +63,8 @@ class EngineLoop:
         # Controls (placeholders for Slice 1)
         self._intent = "FLAT"
         self._arm = False
+        self._last_cmd_id = 0
+        self._last_cmd_ts_unix_ms: Optional[int] = None
 
         # Feed + quote state (J2/J3)
         self._feed_connected = False
@@ -117,6 +122,9 @@ class EngineLoop:
 
         # Increment snapshot ID (monotonic)
         self._snapshot_id += 1
+
+        # CYCLE BOUNDARY: Drain and apply commands (last-write-wins coalescing)
+        self._drain_commands()
 
         # Drain inbound events for liveness/feed/quote
         self._drain_inbound_events()
@@ -216,6 +224,8 @@ class EngineLoop:
             controls=ControlsDTO(
                 intent=self._intent,
                 arm=self._arm,
+                last_cmd_id=self._last_cmd_id,
+                last_cmd_ts_unix_ms=self._last_cmd_ts_unix_ms,
             ),
             loop=LoopHealthDTO(
                 cycle_ms=cycle_elapsed_ms,
@@ -277,3 +287,26 @@ class EngineLoop:
             elif isinstance(event, AdapterErrorEvent):
                 if event.error_msg:
                     self._feed_status_reason_codes = [event.error_msg]
+
+    def _drain_commands(self) -> None:
+        """
+        Drain CommandQueue at cycle boundary with last-write-wins coalescing.
+
+        V1a-J3: Commands are the ONLY way UI can update Intent/ARM.
+        Coalescing ensures deterministic application per cycle.
+        """
+        if not self.command_queue:
+            return
+
+        batch = self.command_queue.drain()
+
+        # Apply coalesced Intent/ARM (last-write-wins)
+        if batch.intent is not None:
+            self._intent = batch.intent
+        if batch.arm is not None:
+            self._arm = batch.arm
+
+        # Update command tracking (last command identity)
+        if batch.last_cmd_id > 0:
+            self._last_cmd_id = batch.last_cmd_id
+            self._last_cmd_ts_unix_ms = batch.last_cmd_ts_unix_ms

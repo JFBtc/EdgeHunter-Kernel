@@ -5,6 +5,7 @@ Minimal runnable skeleton with atomic snapshot publisher and CLI UI
 import os
 import sys
 import time
+from src.command_queue import CommandQueue
 from src.datahub import DataHub
 from src.engine import EngineLoop
 from src.ui import MinimalCLI
@@ -41,8 +42,9 @@ def main():
 
     # Create components
     datahub = DataHub()
-    engine = EngineLoop(datahub, cycle_target_ms=100)  # 10 Hz
-    ui = MinimalCLI(datahub, display_interval_ms=500)
+    command_queue = CommandQueue(maxsize=100)
+    engine = EngineLoop(datahub, cycle_target_ms=100, command_queue=command_queue)  # 10 Hz
+    ui = MinimalCLI(datahub, display_interval_ms=500, command_queue=command_queue)
 
     try:
         # Start engine loop
